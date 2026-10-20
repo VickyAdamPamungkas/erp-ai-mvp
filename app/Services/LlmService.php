@@ -145,16 +145,20 @@ PROMPT;
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT        => $timeout,
                 CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0,
             ]);
 
-            $response = curl_exec($ch);
-            $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $response  = curl_exec($ch);
+            $curlError = curl_error($ch);
+            $curlErrno = curl_errno($ch);
+            $httpCode  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
 
             // -- Timeout / error jaringan → retry --------------------------
 
-            if ($response === false) {
-                $lastError = 'NETWORK_ERROR';
+            if ($response === false || $curlErrno > 0) {
+                $lastError = 'NETWORK_ERROR: ' . ($curlError ?: 'errno ' . $curlErrno);
                 $lastRaw   = null;
                 continue;
             }
@@ -162,19 +166,19 @@ PROMPT;
             // -- HTTP 429 atau 5xx → retry ---------------------------------
 
             if ($httpCode === 429 || $httpCode >= 500) {
-                $lastError = 'HTTP_' . $httpCode;
+                $lastError = 'HTTP_' . $httpCode . ': ' . substr((string)$response, 0, 200);
                 $lastRaw   = null;
                 continue;
             }
 
             // -- 4xx lain (selain 429) → gagal langsung, tanpa retry -------
 
-            if ($httpCode >= 400) {
+            if ($httpCode !== 200) {
                 return self::makeResult(
                     ok:         false,
                     data:       null,
-                    raw:        null,
-                    error:      'API_ERROR',
+                    raw:        $response,
+                    error:      'HTTP_' . $httpCode . ': ' . substr((string)$response, 0, 200),
                     model:      $model,
                     latencyMs:  self::elapsed($startTime),
                     attempts:   $attempts,
