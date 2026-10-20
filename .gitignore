@@ -1,0 +1,13 @@
+# Konfigurasi sensitif
+config/api.php
+config/db.php
+.env
+
+# Log
+*.log
+
+# Vendor (jika nanti dipakai)
+vendor/
+
+# Backup database
+backup_*.sql
