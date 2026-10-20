@@ -1,73 +1,157 @@
-CREATE DATABASE IF NOT EXISTS erp_ai_mvp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE erp_ai_mvp;
+-- ============================================================
+-- WoodMind ERP — Database Schema
+-- Database : woodmind_erp
+-- Compat   : MySQL 8.0 & MariaDB 10.4+
+-- Idempoten: CREATE ... IF NOT EXISTS
+-- ============================================================
 
-CREATE TABLE users (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(50) NOT NULL UNIQUE,
-  password VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+CREATE DATABASE IF NOT EXISTS woodmind_erp
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE materials (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  unit VARCHAR(20) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+USE woodmind_erp;
 
-CREATE TABLE locations (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- ------------------------------------------------------------
+-- 1. roles
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS roles (
+    id        INT          AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50)  NOT NULL UNIQUE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE stock (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  material_id INT NOT NULL,
-  location_id INT NOT NULL,
-  quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
-  UNIQUE KEY uq_stock (material_id, location_id),
-  FOREIGN KEY (material_id) REFERENCES materials(id),
-  FOREIGN KEY (location_id) REFERENCES locations(id)
-);
+-- ------------------------------------------------------------
+-- 2. users
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+    id            INT           AUTO_INCREMENT PRIMARY KEY,
+    username      VARCHAR(50)   NOT NULL UNIQUE,
+    password_hash VARCHAR(255)  NOT NULL,
+    role_id       INT           NOT NULL,
+    CONSTRAINT fk_users_role
+        FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE stock_transactions (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  transaction_type ENUM('IN','UPDATE','TRANSFER') NOT NULL,
-  material_id INT NOT NULL,
-  quantity DECIMAL(12,2) NOT NULL,
-  source_location_id INT NULL,
-  destination_location_id INT NULL,
-  note VARCHAR(255) NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (material_id) REFERENCES materials(id),
-  FOREIGN KEY (source_location_id) REFERENCES locations(id),
-  FOREIGN KEY (destination_location_id) REFERENCES locations(id)
-);
+-- ------------------------------------------------------------
+-- 3. products
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS products (
+    id           INT          AUTO_INCREMENT PRIMARY KEY,
+    product_name VARCHAR(100) NOT NULL UNIQUE,
+    unit         VARCHAR(20)  NOT NULL,
+    is_active    TINYINT(1)   NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE ai_requests (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_input TEXT NOT NULL,
-  intent VARCHAR(50) NULL,
-  parameters_json JSON NULL,
-  validation_status ENUM('PENDING','VALID','INVALID') DEFAULT 'PENDING',
-  validation_message TEXT NULL,
-  user_confirmed TINYINT(1) DEFAULT 0,
-  execution_status ENUM('PENDING','EXECUTED','CANCELLED','FAILED') DEFAULT 'PENDING',
-  error_type VARCHAR(50) NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- ------------------------------------------------------------
+-- 4. warehouses
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS warehouses (
+    id             INT          AUTO_INCREMENT PRIMARY KEY,
+    warehouse_name VARCHAR(100) NOT NULL UNIQUE,
+    is_active      TINYINT(1)   NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO users (username, password) VALUES ('admin', SHA2('admin123', 256));
+-- ------------------------------------------------------------
+-- 5. stocks
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS stocks (
+    id           INT           AUTO_INCREMENT PRIMARY KEY,
+    product_id   INT           NOT NULL,
+    warehouse_id INT           NOT NULL,
+    quantity     DECIMAL(12,3) NOT NULL DEFAULT 0,
+    UNIQUE KEY uq_product_warehouse (product_id, warehouse_id),
+    CONSTRAINT fk_stocks_product
+        FOREIGN KEY (product_id)   REFERENCES products   (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_stocks_warehouse
+        FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT,
+    CONSTRAINT chk_stocks_qty_non_negative
+        CHECK (quantity >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO materials (name, unit) VALUES
-('Kayu Jati','kg'),
-('Kayu Mahoni','kg'),
-('Kayu Pinus','kg');
+-- ------------------------------------------------------------
+-- 6. stock_movements
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id                    INT                            AUTO_INCREMENT PRIMARY KEY,
+    movement_type         ENUM('IN','OUT','TRANSFER')    NOT NULL,
+    product_id            INT                            NOT NULL,
+    qty                   DECIMAL(12,3)                  NOT NULL,
+    source_warehouse_id   INT                            NULL,
+    dest_warehouse_id     INT                            NULL,
+    user_id               INT                            NOT NULL,
+    created_at            TIMESTAMP                      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_movements_product
+        FOREIGN KEY (product_id)          REFERENCES products   (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_movements_source
+        FOREIGN KEY (source_warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_movements_dest
+        FOREIGN KEY (dest_warehouse_id)   REFERENCES warehouses (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_movements_user
+        FOREIGN KEY (user_id)             REFERENCES users      (id) ON DELETE RESTRICT,
+    CONSTRAINT chk_movements_qty_positive
+        CHECK (qty > 0),
+    CONSTRAINT chk_movements_consistency
+        CHECK (
+            (movement_type = 'IN'
+                AND source_warehouse_id IS NULL
+                AND dest_warehouse_id   IS NOT NULL)
+            OR
+            (movement_type = 'OUT'
+                AND source_warehouse_id IS NOT NULL
+                AND dest_warehouse_id   IS NULL)
+            OR
+            (movement_type = 'TRANSFER'
+                AND source_warehouse_id IS NOT NULL
+                AND dest_warehouse_id   IS NOT NULL
+                AND source_warehouse_id <> dest_warehouse_id)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO locations (name) VALUES ('Gudang A'), ('Gudang B');
+-- index: pencarian riwayat per produk
+CREATE INDEX idx_movements_product_created
+    ON stock_movements (product_id, created_at);
 
-INSERT INTO stock (material_id, location_id, quantity) VALUES
-(1,1,100),(1,2,30),
-(2,1,75),(2,2,20),
-(3,1,50),(3,2,10);
+-- ------------------------------------------------------------
+-- 7. audit_logs
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                INT                                                    AUTO_INCREMENT PRIMARY KEY,
+    user_id           INT                                                    NULL,
+    raw_prompt        TEXT                                                   NOT NULL,
+    llm_json_response JSON                                                   NULL,
+    decision          ENUM('EXECUTED','REJECTED','CLARIFIED','CANCELLED')    NOT NULL,
+    reason            VARCHAR(255)                                           NULL,
+    movement_id       INT                                                    NULL,
+    model_name        VARCHAR(100)                                           NULL,
+    latency_ms        INT                                                    NULL,
+    created_at        TIMESTAMP                                              NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_audit_user
+        FOREIGN KEY (user_id)     REFERENCES users           (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_audit_movement
+        FOREIGN KEY (movement_id) REFERENCES stock_movements (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_audit_created_at ON audit_logs (created_at);
+CREATE INDEX idx_audit_decision   ON audit_logs (decision);
+
+-- ------------------------------------------------------------
+-- Trigger: audit_logs append-only
+-- ------------------------------------------------------------
+DELIMITER //
+
+CREATE TRIGGER trg_audit_no_update
+BEFORE UPDATE ON audit_logs
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'audit_logs bersifat append-only';
+END //
+
+CREATE TRIGGER trg_audit_no_delete
+BEFORE DELETE ON audit_logs
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'audit_logs bersifat append-only';
+END //
+
+DELIMITER ;
