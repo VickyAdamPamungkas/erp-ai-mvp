@@ -15,6 +15,7 @@ $tests = [
     'ValidationLayer Test Suite'   => __DIR__ . '/ValidationLayerTest.php',
     'Models & Normalizer DB Suite' => __DIR__ . '/unit_models_test.php',
     'ChatController & Audit Suite' => __DIR__ . '/chat_controller_test.php',
+    'TransactionController Suite'  => __DIR__ . '/transaction_controller_test.php',
 ];
 
 echo "\n" . str_repeat('#', 90) . "\n";
